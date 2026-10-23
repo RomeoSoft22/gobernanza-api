@@ -17,7 +17,12 @@ class SesionDocumento extends Model
 
     protected $fillable = [
         'sesion_id', 'tipo', 'nombre_original', 'ruta', 'mime', 'tamano', 'descripcion',
-        'drive_file_id', 'drive_url', 'drive_modificado_at',
+        'drive_file_id', 'drive_url', 'drive_modificado_at', 'registrado_por',
+    ];
+
+    /** Nombre legible de cada tipo (para la auditoría). */
+    public const ETIQUETAS = [
+        'acta' => 'Acta', 'asistencia' => 'Lista de asistencia', 'presentacion' => 'Presentación', 'adjunto' => 'Adjunto',
     ];
 
     protected $hidden = ['ruta'];

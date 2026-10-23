@@ -26,7 +26,7 @@ class GoogleDrive
 
     public const MIME_CARPETA = 'application/vnd.google-apps.folder';
 
-    private const CAMPOS = 'id,name,mimeType,webViewLink,modifiedTime,size,trashed';
+    private const CAMPOS = 'id,name,mimeType,webViewLink,modifiedTime,size,trashed,lastModifyingUser(displayName,emailAddress)';
 
     /** Formato de descarga de los documentos nativos de Google (Docs, Sheets, Slides). */
     private const EXPORTAR = [

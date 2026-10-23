@@ -92,8 +92,27 @@ IDENTIDAD_CLIENT_SECRET=...    # client_secret (se muestra una sola vez al regis
 IDENTIDAD_REDIRECT_URI=http://localhost:4200/callback   # en producción: https://juarezcampos.net/gobernanza/callback
 IDENTIDAD_POST_LOGOUT_URI=http://localhost:4200/
 IDENTIDAD_AUDIENCE=GOBERNANZA
-IDENTIDAD_ROLES=ADMIN
+IDENTIDAD_ROLES=*            # cualquier rol de GOBERNANZA puede operar
+IDENTIDAD_ROLES_ADMIN=ADMIN  # además ve Configuración de Google Drive y Auditoría
 ```
+
+### Perfiles
+
+| Perfil (rol en identidad) | Puede |
+| --- | --- |
+| `ADMIN` | Todo, incluidos **Configuración › Google Drive** y **Auditoría** |
+| Cualquier otro rol de GOBERNANZA (p. ej. `OPERADOR`) | Registrar y editar sesiones, crear años, subir, mover y quitar documentos |
+
+El bloqueo se aplica en la API (`RequiereAdmin`), no solo ocultando el menú.
+
+### Auditoría
+
+Tabla `auditoria`: cada movimiento con usuario (nombre, correo, perfil), fecha y hora, IP, navegador y detalle
+(campos "antes / después" al editar una sesión; tipo de origen y destino al mover un documento). Registra:
+sesiones registradas, editadas y eliminadas; años creados; documentos subidos, movidos, editados y enviados a la
+papelera; archivos que aparecen o desaparecen en la carpeta de Drive; conexión de Drive, carpetas e importaciones.
+Las sesiones guardan `registrado_por` / `actualizado_por` y los documentos `registrado_por` (si se agregaron
+directamente en Drive, quien los dejó en la carpeta). Consulta y exportación a CSV en `/api/auditoria` (solo ADMIN).
 
 En local el front-end usa el proxy de `ng serve` (`/api` → `127.0.0.1:8000`), así la cookie funciona como en producción.
 Para ingresar desde local, registre también `http://localhost:4200/callback` como redirección del cliente en identidad.
@@ -149,6 +168,7 @@ php artisan test
 | PUT | `/api/drive/carpetas` | Asignar carpeta raíz (`tipo_reunion_id`, `clase`, `enlace`) |
 | POST | `/api/drive/importar-historial` | Lanza la importación en segundo plano |
 | GET | `/api/drive/importacion` | Avance de la importación |
+| GET | `/api/auditoria` · `/catalogos` · `/exportar` | Auditoría con filtros y CSV (solo ADMIN) |
 
 ## Pendiente recomendado
 

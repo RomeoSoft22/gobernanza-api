@@ -98,7 +98,13 @@ class AccesoController extends Controller
 
     private function usuario(array $claims): array
     {
-        return ['nombre' => $claims['name'] ?? null, 'correo' => $claims['email'] ?? null, 'roles' => (array) ($claims['roles'] ?? [])];
+        return [
+            'nombre' => $claims['name'] ?? null,
+            'correo' => $claims['email'] ?? null,
+            'roles' => (array) ($claims['roles'] ?? []),
+            // El front-end muestra Configuración de Drive y Auditoría solo si es administrador.
+            'admin' => Identidad::esAdministrador($claims),
+        ];
     }
 
     /**

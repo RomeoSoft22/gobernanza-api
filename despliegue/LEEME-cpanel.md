@@ -11,6 +11,8 @@ Usuario de cPanel: `juarezc` · Carpeta personal: `/home/juarezc/`
 > El código y el `.env` quedan **fuera** de `public_html` (como `istqb-api-app`): así nadie puede descargar
 > el `.env`, los logs ni el código desde el navegador.
 
+Si en el paso 1 ya registraste GOBERNANZA en el panel (client_id, rol ADMIN y tu matrícula), sáltalo.
+
 Sigue los pasos **en orden**. En el Administrador de archivos activa **Configuración → Mostrar archivos ocultos**.
 
 ---
@@ -67,10 +69,13 @@ Cambia **solo** estas líneas:
 | --- | --- |
 | `DB_USERNAME=` | el usuario MySQL del paso 4 (ej. `juarezc_gobernanza`) |
 | `DB_PASSWORD=` | su contraseña |
-| `IDENTIDAD_CLIENT_ID=` | el **client_id** del paso 1 (reemplaza `PEGAR_CLIENT_ID`) |
-| `IDENTIDAD_CLIENT_SECRET=` | el **client_secret** del paso 1 (reemplaza `PEGAR_CLIENT_SECRET`) |
 
-No toques `APP_KEY`. `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` ya vienen llenos.
+`IDENTIDAD_CLIENT_ID`, `IDENTIDAD_CLIENT_SECRET`, `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` ya vienen llenos
+(se toman del `.env` local). Solo si alguno dice `PEGAR_CLIENT_ID` / `PEGAR_CLIENT_SECRET`, pega ahí los del paso 1.
+No toques `APP_KEY`.
+
+Perfiles: `IDENTIDAD_ROLES=*` deja operar a cualquier rol de GOBERNANZA y `IDENTIDAD_ROLES_ADMIN=ADMIN` define quién
+ve **Google Drive** y **Auditoría**.
 
 Si después cambias el `.env`, vacía `gobernanza-api-app/bootstrap/cache/` (borra todo menos `.gitignore`).
 

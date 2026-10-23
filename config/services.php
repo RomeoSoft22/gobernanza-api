@@ -49,7 +49,10 @@ return [
         'post_logout_redirect_uri' => env('IDENTIDAD_POST_LOGOUT_URI'),
         // Código del sistema registrado en identidad (claim "aud" del JWT).
         'audience' => env('IDENTIDAD_AUDIENCE', 'GOBERNANZA'),
-        'roles' => array_values(array_filter(array_map('trim', explode(',', (string) env('IDENTIDAD_ROLES', 'ADMIN'))))),
+        // Roles que pueden usar el sistema ("*" = cualquier rol de GOBERNANZA) y roles de administración
+        // (los únicos que ven Configuración de Google Drive y Auditoría).
+        'roles' => array_values(array_filter(array_map('trim', explode(',', (string) env('IDENTIDAD_ROLES', '*'))))),
+        'roles_admin' => array_values(array_filter(array_map('trim', explode(',', (string) env('IDENTIDAD_ROLES_ADMIN', 'ADMIN'))))),
         'refresh_cookie' => 'gobernanza_refresh',
         'refresh_minutes' => (int) env('IDENTIDAD_REFRESH_MINUTOS', 480),
     ],

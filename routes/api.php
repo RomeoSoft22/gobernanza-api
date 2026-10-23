@@ -1,11 +1,13 @@
 <?php
 
 use App\Http\Controllers\Api\AccesoController;
+use App\Http\Controllers\Api\AuditoriaController;
 use App\Http\Controllers\Api\DriveController;
 use App\Http\Controllers\Api\SesionController;
 use App\Http\Controllers\Api\SesionDocumentoController;
 use App\Http\Controllers\Api\TipoReunionController;
 use App\Http\Middleware\RequiereAcceso;
+use App\Http\Middleware\RequiereAdmin;
 use Illuminate\Support\Facades\Route;
 
 Route::get('estado', fn () => ['estado' => 'ok']);
@@ -38,15 +40,23 @@ Route::middleware(RequiereAcceso::class)->group(function () {
     Route::patch('documentos/{documento}', [SesionDocumentoController::class, 'update']);
     Route::delete('documentos/{documento}', [SesionDocumentoController::class, 'destroy']);
 
-    // Google Drive
-    Route::prefix('drive')->group(function () {
-        Route::get('estado', [DriveController::class, 'estado']);
-        Route::get('autorizar', [DriveController::class, 'autorizar']);
-        Route::delete('conexion', [DriveController::class, 'desconectar']);
-        Route::put('carpetas', [DriveController::class, 'definirCarpeta']);
-        Route::delete('carpetas/{carpeta}', [DriveController::class, 'quitarCarpeta']);
-        Route::post('importar-historial', [DriveController::class, 'importarHistorial']);
-        Route::get('importacion', [DriveController::class, 'estadoImportacion']);
+    // Google Drive y Auditoría: solo el perfil administrador
+    Route::middleware(RequiereAdmin::class)->group(function () {
+        Route::prefix('drive')->group(function () {
+            Route::get('estado', [DriveController::class, 'estado']);
+            Route::get('autorizar', [DriveController::class, 'autorizar']);
+            Route::delete('conexion', [DriveController::class, 'desconectar']);
+            Route::put('carpetas', [DriveController::class, 'definirCarpeta']);
+            Route::delete('carpetas/{carpeta}', [DriveController::class, 'quitarCarpeta']);
+            Route::post('importar-historial', [DriveController::class, 'importarHistorial']);
+            Route::get('importacion', [DriveController::class, 'estadoImportacion']);
+        });
+
+        Route::get('auditoria', [AuditoriaController::class, 'index']);
+        Route::get('auditoria/catalogos', [AuditoriaController::class, 'catalogos']);
+        Route::get('auditoria/exportar', [AuditoriaController::class, 'exportar']);
     });
+
+    // Lectura en vivo de la carpeta de la sesión (todos los perfiles)
     Route::post('sesiones/{sesion}/drive/sincronizar', [DriveController::class, 'sincronizarSesion']);
 });

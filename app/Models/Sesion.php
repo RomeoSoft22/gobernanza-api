@@ -21,6 +21,7 @@ class Sesion extends Model
         'tipo_reunion_id', 'clase', 'numero', 'anio', 'fecha', 'hora_inicio', 'hora_fin',
         'modalidad', 'lugar', 'estado', 'agenda', 'acuerdos', 'observaciones',
         'drive_folder_id', 'drive_folder_url', 'drive_sincronizado_at',
+        'registrado_por', 'actualizado_por',
     ];
 
     public const CLASES = ['ordinaria', 'extraordinaria'];

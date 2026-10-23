@@ -8,6 +8,7 @@ use App\Models\DriveCarpeta;
 use App\Models\Sesion;
 use App\Models\TipoReunion;
 use App\Services\DriveSincronizador;
+use App\Support\Auditor;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Throwable;
@@ -84,7 +85,14 @@ class SesionController extends Controller
             'anio' => ['required', 'integer', 'between:2000,2100'],
         ]);
 
-        $carpetas = $this->drive->crearAnio(TipoReunion::findOrFail($data['tipo_reunion_id']), $data['anio']);
+        $tipo = TipoReunion::findOrFail($data['tipo_reunion_id']);
+        $carpetas = $this->drive->crearAnio($tipo, $data['anio']);
+
+        Auditor::registrar('anio.creado', "Año {$data['anio']} creado para {$tipo->nombre} (carpetas: ".implode(' y ', array_map(fn ($c) => "{$c}s", array_keys($carpetas))).')', null, [
+            'reunion' => $tipo->nombre,
+            'anio' => $data['anio'],
+            'carpetas' => collect($carpetas)->map(fn ($c) => $c->url)->all(),
+        ]);
 
         return response()->json($carpetas, 201);
     }
@@ -129,7 +137,12 @@ class SesionController extends Controller
 
     public function store(SesionRequest $request)
     {
-        $sesion = Sesion::create($request->validated());
+        $sesion = Sesion::create($request->validated() + ['registrado_por' => Auditor::nombre()]);
+
+        Auditor::registrar('sesion.creada', Auditor::etiquetaSesion($sesion).' registrada', $sesion, [
+            'estado' => $sesion->estado,
+            'modalidad' => $sesion->modalidad,
+        ]);
 
         return response()->json($this->conCarpetaDrive($sesion), 201);
     }
@@ -141,14 +154,27 @@ class SesionController extends Controller
 
     public function update(SesionRequest $request, Sesion $sesion)
     {
-        $sesion->update($request->validated());
+        $antes = $sesion->getAttributes();
+        $sesion->update($request->validated() + ['actualizado_por' => Auditor::nombre()]);
+
+        $cambios = Auditor::cambiosSesion($antes, $sesion);
+        if ($cambios) {
+            Auditor::registrar('sesion.actualizada', Auditor::etiquetaSesion($sesion).' editada: '.implode(', ', array_keys($cambios)), $sesion, ['cambios' => $cambios]);
+        }
 
         return $this->cargar($sesion);
     }
 
     public function destroy(Sesion $sesion)
     {
+        $etiqueta = Auditor::etiquetaSesion($sesion);
+        $documentos = $sesion->documentos()->pluck('nombre_original')->all();
         $sesion->delete();
+
+        Auditor::registrar('sesion.eliminada', "{$etiqueta} eliminada del sistema (su carpeta en Drive se conserva)", $sesion, [
+            'documentos_vinculados' => $documentos,
+            'carpeta_drive' => $sesion->drive_folder_url,
+        ]);
 
         return response()->noContent();
     }

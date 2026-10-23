@@ -5,6 +5,7 @@ use App\Models\SesionDocumento;
 use App\Models\TipoReunion;
 use App\Services\DriveSincronizador;
 use App\Services\ImportacionDrive;
+use App\Support\Auditor;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 
@@ -27,6 +28,9 @@ Artisan::command('drive:importar {reunion : slug de la reunión (operativo, tact
         return 1;
     }
 
+    // Lanzada desde el panel: se audita a nombre de quien la inició; por consola, como "Sistema".
+    $usuario = $estado->enCurso() ? $estado->usuario() : null;
+    Auditor::comoUsuario($usuario);
     $estado->iniciar($tipo, $clase);
     $this->info("Importando {$tipo->nombre} ({$clase}s) desde Google Drive…");
 
@@ -37,12 +41,17 @@ Artisan::command('drive:importar {reunion : slug de la reunión (operativo, tact
         });
     } catch (Throwable $e) {
         $estado->fallar($e->getMessage());
+        Auditor::registrar('drive.importacion_error', "Importación de {$tipo->nombre} ({$clase}s) con error: ".$e->getMessage(), null, [
+            'reunion' => $tipo->nombre, 'clase' => $clase,
+        ]);
         $this->error($e->getMessage());
 
         return 1;
     }
 
     $estado->terminar($stats);
+    Auditor::registrar('drive.importacion_terminada', sprintf('Importación de %s (%ss) terminada: %d sesión(es), %d documento(s)',
+        $tipo->nombre, $clase, $stats['sesiones'], $stats['documentos']), null, ['reunion' => $tipo->nombre, 'clase' => $clase] + $stats);
     $this->newLine();
     $this->info("Años: {$stats['anios']} · Sesiones: {$stats['sesiones']} · Documentos: {$stats['documentos']} · Desvinculados: {$stats['desvinculados']}");
     foreach ($stats['omitidas'] as $omitida) {

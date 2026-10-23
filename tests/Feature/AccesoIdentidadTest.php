@@ -43,15 +43,23 @@ class AccesoIdentidadTest extends TestCase
         $jwt = $this->tokenIdentidad(['ADMIN']);
 
         $this->withToken($jwt)->getJson('/api/acceso/yo')->assertOk()
-            ->assertJsonPath('usuario.correo', 'ana@juarezcampos.net');
+            ->assertJsonPath('usuario.correo', 'ana@juarezcampos.net')
+            ->assertJsonPath('usuario.admin', true);
+        $this->withToken($this->tokenIdentidad(['OPERADOR']))->getJson('/api/acceso/yo')
+            ->assertJsonPath('usuario.admin', false);
         $this->withToken($jwt)->getJson('/api/tipos-reunion')->assertOk()->assertJsonCount(2);
         $this->withToken($jwt)->getJson('/api/sesiones?tipo_reunion_id=1')->assertOk();
     }
 
-    public function test_token_sin_rol_admitido_recibe_403(): void
+    public function test_token_sin_ningun_rol_recibe_403(): void
     {
-        $this->withToken($this->tokenIdentidad(['LECTOR']))->getJson('/api/sesiones')
+        $this->withToken($this->tokenIdentidad([]))->getJson('/api/sesiones')
             ->assertForbidden()->assertJsonPath('codigo', 'sin_permiso');
+    }
+
+    public function test_cualquier_rol_de_gobernanza_puede_operar(): void
+    {
+        $this->withToken($this->tokenIdentidad(['OPERADOR']))->getJson('/api/sesiones')->assertOk();
     }
 
     public function test_rechaza_tokens_invalidos(): void

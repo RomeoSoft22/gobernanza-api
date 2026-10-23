@@ -54,10 +54,22 @@ class Identidad
         return $claims;
     }
 
-    /** ¿Alguno de los roles del token permite usar el sistema? */
+    /**
+     * ¿Puede usar el sistema? Con IDENTIDAD_ROLES=* basta cualquier rol de GOBERNANZA
+     * (el token solo se emite si el usuario está matriculado en el sistema).
+     */
     public static function tieneAcceso(array $claims): bool
     {
-        return array_intersect((array) ($claims['roles'] ?? []), (array) self::config('roles')) !== [];
+        $roles = (array) ($claims['roles'] ?? []);
+        $admitidos = (array) self::config('roles');
+
+        return in_array('*', $admitidos, true) ? $roles !== [] : array_intersect($roles, $admitidos) !== [];
+    }
+
+    /** ¿Puede ver Configuración de Google Drive y Auditoría? */
+    public static function esAdministrador(array $claims): bool
+    {
+        return array_intersect((array) ($claims['roles'] ?? []), (array) self::config('roles_admin')) !== [];
     }
 
     public static function jwks(bool $recargar = false): array

@@ -33,7 +33,7 @@ TAR="${TAR:-/c/Windows/System32/tar.exe}"
 export NG_CLI_ANALYTICS=false
 
 paso() { printf '\n\033[36m== %s\033[0m\n' "$*"; }
-valor_env() { grep -E "^$1=" "$API/.env" 2>/dev/null | head -1 | cut -d= -f2- || true; }
+valor_env() { grep -E "^$1=" "$API/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true; }
 # tar.exe (bsdtar de Windows) genera .zip con rutas "/", compatibles con el extractor de cPanel.
 zip_de() { local zip; zip="$(cygpath -w "$1" 2>/dev/null || echo "$1")"; shift; (cd "$C" && "$TAR" -a -c -f "$zip" "$@"); }
 
@@ -71,6 +71,9 @@ if [ "$ACTUALIZACION" = "1" ]; then
   rm -rf "$D/storage"
 else
   paso "    .env de producción"
+  # Las llaves de identidad y de Google se toman del .env local (si están llenas).
+  IDENTIDAD_ID="$(valor_env IDENTIDAD_CLIENT_ID)"
+  IDENTIDAD_SECRETO="$(valor_env IDENTIDAD_CLIENT_SECRET)"
   APP_KEY_NUEVA="base64:$("$PHP" -r 'echo base64_encode(random_bytes(32));')"
   sed -e "s|^APP_NAME=.*|APP_NAME=\"Gobernanza - Reuniones\"|" \
       -e "s|^APP_ENV=.*|APP_ENV=production|" \
@@ -86,8 +89,8 @@ else
       -e "s|^GOOGLE_CLIENT_SECRET=.*|GOOGLE_CLIENT_SECRET=$(valor_env GOOGLE_CLIENT_SECRET)|" \
       -e "s|^GOOGLE_REDIRECT_URI=.*|GOOGLE_REDIRECT_URI=$URL_API/drive/callback|" \
       -e "s|^FRONTEND_URL=.*|FRONTEND_URL=$URL_WEB|" \
-      -e "s|^IDENTIDAD_CLIENT_ID=.*|IDENTIDAD_CLIENT_ID=PEGAR_CLIENT_ID|" \
-      -e "s|^IDENTIDAD_CLIENT_SECRET=.*|IDENTIDAD_CLIENT_SECRET=PEGAR_CLIENT_SECRET|" \
+      -e "s|^IDENTIDAD_CLIENT_ID=.*|IDENTIDAD_CLIENT_ID=${IDENTIDAD_ID:-PEGAR_CLIENT_ID}|" \
+      -e "s|^IDENTIDAD_CLIENT_SECRET=.*|IDENTIDAD_CLIENT_SECRET=${IDENTIDAD_SECRETO:-PEGAR_CLIENT_SECRET}|" \
       -e "s|^IDENTIDAD_REDIRECT_URI=.*|IDENTIDAD_REDIRECT_URI=$URL_WEB/callback|" \
       -e "s|^IDENTIDAD_POST_LOGOUT_URI=.*|IDENTIDAD_POST_LOGOUT_URI=$URL_WEB/|" \
       "$API/.env.example" > "$D/.env"
@@ -98,7 +101,8 @@ fi
 paso "4/5 Base de datos (${CPANEL_USUARIO}_gobernanza)"
 # Datos actuales (sesiones, documentos vinculados, carpetas de Drive). Se omiten la conexión de Google
 # (tokens del equipo local: en el servidor se vuelve a conectar) y las tablas temporales.
-OMITIR_DATOS=(drive_conexiones cache cache_locks sessions jobs job_batches failed_jobs password_reset_tokens)
+# La auditoría empieza vacía en producción (sin las pruebas hechas en local).
+OMITIR_DATOS=(drive_conexiones auditoria cache cache_locks sessions jobs job_batches failed_jobs password_reset_tokens)
 IGNORAR=(); for t in "${OMITIR_DATOS[@]}"; do IGNORAR+=("--ignore-table=$BD_LOCAL.$t"); done
 DUMP_OPC=(-uroot --host=127.0.0.1 --default-character-set=utf8mb4 --no-tablespaces --set-gtid-purged=OFF --skip-comments)
 {

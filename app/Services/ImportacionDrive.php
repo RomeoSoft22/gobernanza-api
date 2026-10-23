@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\DriveException;
 use App\Models\TipoReunion;
+use App\Support\Auditor;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 
@@ -92,7 +93,14 @@ class ImportacionDrive
             'sesiones' => 0,
             'resultado' => null,
             'mensaje' => null,
+            'usuario' => Auditor::usuario(),
         ]);
+    }
+
+    /** Usuario que lanzó la importación (para auditar desde el proceso en segundo plano). */
+    public function usuario(): ?array
+    {
+        return Cache::get(self::CLAVE)['usuario'] ?? null;
     }
 
     public function avance(string $linea): void

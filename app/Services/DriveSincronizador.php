@@ -7,6 +7,7 @@ use App\Models\DriveCarpeta;
 use App\Models\Sesion;
 use App\Models\SesionDocumento;
 use App\Models\TipoReunion;
+use App\Support\Auditor;
 use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 
@@ -113,7 +114,7 @@ class DriveSincronizador
             $this->carpetaSesion($sesion),
         );
 
-        return $this->vincular($sesion, $subido, $tipo, $descripcion);
+        return $this->vincular($sesion, $subido, $tipo, $descripcion, Auditor::nombre());
     }
 
     /**
@@ -122,8 +123,9 @@ class DriveSincronizador
      *  - los ya vinculados conservan el tipo asignado (aunque se hayan movido de tarjeta),
      *  - los que ya no están en la carpeta se desvinculan.
      * Con $crearCarpeta = false no crea nada en Drive si la sesión aún no tiene carpeta.
+     * Los cambios encontrados quedan en la auditoría (salvo en la importación, que deja un solo registro).
      */
-    public function sincronizarSesion(Sesion $sesion, bool $crearCarpeta = true): array
+    public function sincronizarSesion(Sesion $sesion, bool $crearCarpeta = true, bool $auditar = true): array
     {
         if (! $sesion->drive_folder_id && ! $crearCarpeta) {
             return ['agregados' => 0, 'desvinculados' => 0, 'total' => 0];
@@ -132,32 +134,51 @@ class DriveSincronizador
         $archivos = $this->archivosDe($this->carpetaSesion($sesion));
         $vinculados = $sesion->documentos()->whereNotNull('drive_file_id')->pluck('tipo', 'drive_file_id');
 
-        $agregados = 0;
+        $nuevos = [];
         foreach ($archivos as $archivo) {
             $existe = isset($vinculados[$archivo['id']]);
-            $this->vincular($sesion, $archivo, $vinculados[$archivo['id']] ?? SesionDocumento::clasificar($archivo['name']));
-            $agregados += $existe ? 0 : 1;
+            $doc = $this->vincular($sesion, $archivo, $vinculados[$archivo['id']] ?? SesionDocumento::clasificar($archivo['name']));
+            if (! $existe) {
+                $nuevos[] = ['archivo' => $doc->nombre_original, 'tipo' => $doc->tipo, 'registrado_por' => $doc->registrado_por];
+            }
         }
 
-        $desvinculados = 0;
+        $quitados = [];
         $sesion->documentos()
             ->whereNotNull('drive_file_id')
             ->whereNotIn('drive_file_id', array_column($archivos, 'id'))
             ->get()
-            ->each(function (SesionDocumento $doc) use (&$desvinculados) {
+            ->each(function (SesionDocumento $doc) use (&$quitados) {
+                $quitados[] = ['archivo' => $doc->nombre_original, 'tipo' => $doc->tipo, 'registrado_por' => $doc->registrado_por];
                 $doc->delete();
-                $desvinculados++;
             });
 
         $sesion->update(['drive_sincronizado_at' => now()]);
 
-        return ['agregados' => $agregados, 'desvinculados' => $desvinculados, 'total' => count($archivos)];
+        if ($auditar && ($nuevos || $quitados)) {
+            $partes = array_filter([
+                $nuevos ? count($nuevos).' archivo(s) nuevo(s) en Drive' : null,
+                $quitados ? count($quitados).' archivo(s) que ya no están en la carpeta' : null,
+            ]);
+            Auditor::registrar('documento.sincronizado', Auditor::etiquetaSesion($sesion).': '.implode(' y ', $partes), $sesion, [
+                'agregados' => $nuevos,
+                'desvinculados' => $quitados,
+            ]);
+        }
+
+        return ['agregados' => count($nuevos), 'desvinculados' => count($quitados), 'total' => count($archivos)];
     }
 
     /** Guarda o actualiza el enlace al archivo de Drive con sus metadatos (no descarga nada). */
-    private function vincular(Sesion $sesion, array $archivo, string $tipo, ?string $descripcion = null): SesionDocumento
+    private function vincular(Sesion $sesion, array $archivo, string $tipo, ?string $descripcion = null, ?string $registradoPor = null): SesionDocumento
     {
         $doc = $sesion->documentos()->firstOrNew(['drive_file_id' => $archivo['id']]);
+
+        // Quién lo registró: el usuario del sistema que lo subió, o quien lo dejó en la carpeta de Drive.
+        if (! $doc->exists) {
+            $enDrive = $archivo['lastModifyingUser']['displayName'] ?? $archivo['lastModifyingUser']['emailAddress'] ?? null;
+            $doc->registrado_por = $registradoPor ?? ($enDrive ? "{$enDrive} (en Drive)" : 'Google Drive');
+        }
 
         $doc->fill([
             'tipo' => $tipo,
@@ -219,11 +240,11 @@ class DriveSincronizador
                     $sesion->restore();
                 }
                 if ($sesion->wasRecentlyCreated) {
-                    $sesion->update(['estado' => 'realizada', 'modalidad' => 'presencial']);
+                    $sesion->update(['estado' => 'realizada', 'modalidad' => 'presencial', 'registrado_por' => Auditor::nombre().' (importación de Drive)']);
                 }
                 $stats['sesiones']++;
 
-                $r = $this->sincronizarSesion($sesion);
+                $r = $this->sincronizarSesion($sesion, true, false);
                 $stats['documentos'] += $r['total'];
                 $stats['desvinculados'] += $r['desvinculados'];
                 $log("  Sesión N° {$sesion->numero} ({$sesion->fecha->format('d/m/Y')})");

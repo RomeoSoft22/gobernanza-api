@@ -7,6 +7,7 @@ use App\Models\Sesion;
 use App\Models\SesionDocumento;
 use App\Services\DriveSincronizador;
 use App\Services\GoogleDrive;
+use App\Support\Auditor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -32,9 +33,18 @@ class SesionDocumentoController extends Controller
             'archivos.*.mimes' => 'Formato no permitido. Use: '.self::EXTENSIONES.'.',
         ]);
 
-        $creados = collect($data['archivos'])->map(
-            fn ($archivo) => $this->drive->subirDocumento($sesion, $archivo, $data['tipo'], $data['descripcion'] ?? null)
-        );
+        $creados = collect($data['archivos'])->map(function ($archivo) use ($sesion, $data) {
+            $doc = $this->drive->subirDocumento($sesion, $archivo, $data['tipo'], $data['descripcion'] ?? null);
+            Auditor::registrar('documento.subido', sprintf('"%s" subido como %s en %s',
+                $doc->nombre_original, SesionDocumento::ETIQUETAS[$doc->tipo], Auditor::etiquetaSesion($sesion)), $doc, [
+                    'archivo' => $doc->nombre_original,
+                    'tipo' => $doc->tipo,
+                    'tamano' => $doc->tamano,
+                    'drive' => $doc->drive_url,
+                ]);
+
+            return $doc;
+        });
 
         return response()->json($creados, 201);
     }
@@ -62,10 +72,23 @@ class SesionDocumentoController extends Controller
     /** Edita la descripción o mueve el documento a otro tipo (p. ej. de "acta" a "asistencia"). */
     public function update(Request $request, SesionDocumento $documento)
     {
-        $documento->update($request->validate([
+        $data = $request->validate([
             'descripcion' => ['nullable', 'string', 'max:255'],
             'tipo' => ['sometimes', Rule::in(SesionDocumento::TIPOS)],
-        ]));
+        ]);
+        $antes = $documento->only(['tipo', 'descripcion']);
+        $documento->update($data);
+        $sesion = $documento->sesion;
+
+        if ($antes['tipo'] !== $documento->tipo) {
+            Auditor::registrar('documento.movido', sprintf('"%s" movido de %s a %s en %s', $documento->nombre_original,
+                SesionDocumento::ETIQUETAS[$antes['tipo']], SesionDocumento::ETIQUETAS[$documento->tipo], Auditor::etiquetaSesion($sesion)),
+                $documento, ['archivo' => $documento->nombre_original, 'de' => $antes['tipo'], 'a' => $documento->tipo]);
+        }
+        if (array_key_exists('descripcion', $data) && $antes['descripcion'] !== $documento->descripcion) {
+            Auditor::registrar('documento.editado', sprintf('Descripción de "%s" modificada', $documento->nombre_original),
+                $documento, ['antes' => $antes['descripcion'], 'despues' => $documento->descripcion]);
+        }
 
         return $documento;
     }
@@ -81,6 +104,14 @@ class SesionDocumentoController extends Controller
             $drive->enviarAPapelera($documento->drive_file_id);
         }
         $documento->delete();
+
+        Auditor::registrar('documento.eliminado', sprintf('"%s" (%s) enviado a la papelera de Drive desde %s', $documento->nombre_original,
+            SesionDocumento::ETIQUETAS[$documento->tipo], Auditor::etiquetaSesion($documento->sesion)), $documento, [
+                'archivo' => $documento->nombre_original,
+                'tipo' => $documento->tipo,
+                'registrado_por' => $documento->registrado_por,
+                'drive' => $documento->drive_url,
+            ]);
 
         return response()->noContent();
     }
