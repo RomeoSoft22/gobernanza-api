@@ -35,15 +35,30 @@ return [
         ],
     ],
 
+    // Proveedor de identidad central (identidad.juarezcampos.net). GOBERNANZA es un cliente OAuth
+    // confidencial: todo el sistema exige un JWT de identidad con aud=GOBERNANZA y uno de los roles admitidos.
+    'identidad' => [
+        // identidad-web (Angular): /authorize y /logout, en el navegador.
+        'url' => rtrim((string) env('IDENTIDAD_URL', 'https://identidad.juarezcampos.net'), '/'),
+        // API de identidad (Laravel): token y JWKS, servidor a servidor.
+        'api_url' => rtrim((string) env('IDENTIDAD_API_URL', 'https://identidad.juarezcampos.net/api'), '/'),
+        'issuer' => rtrim((string) env('IDENTIDAD_ISSUER', env('IDENTIDAD_URL', 'https://identidad.juarezcampos.net')), '/'),
+        'client_id' => env('IDENTIDAD_CLIENT_ID'),
+        'client_secret' => env('IDENTIDAD_CLIENT_SECRET'),
+        'redirect_uri' => env('IDENTIDAD_REDIRECT_URI'),
+        'post_logout_redirect_uri' => env('IDENTIDAD_POST_LOGOUT_URI'),
+        // Código del sistema registrado en identidad (claim "aud" del JWT).
+        'audience' => env('IDENTIDAD_AUDIENCE', 'GOBERNANZA'),
+        'roles' => array_values(array_filter(array_map('trim', explode(',', (string) env('IDENTIDAD_ROLES', 'ADMIN'))))),
+        'refresh_cookie' => 'gobernanza_refresh',
+        'refresh_minutes' => (int) env('IDENTIDAD_REFRESH_MINUTOS', 480),
+    ],
+
     'google' => [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI', env('APP_URL').'/drive/callback'),
     ],
-
-    // php.exe de línea de comandos para lanzar la importación de Drive en segundo plano
-    // (solo hace falta si la API corre bajo Apache/Nginx en lugar de `php artisan serve`).
-    'php_cli' => env('PHP_CLI_PATH', 'php'),
 
     // URL del front-end Angular (para volver después de conectar Google Drive).
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:4200'),

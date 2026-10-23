@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\GoogleDrive;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
@@ -21,6 +22,8 @@ class SesionDocumento extends Model
 
     protected $hidden = ['ruta'];
 
+    protected $appends = ['url_descarga'];
+
     protected $casts = ['tamano' => 'integer', 'drive_modificado_at' => 'datetime'];
 
     protected static function booted(): void
@@ -31,6 +34,12 @@ class SesionDocumento extends Model
                 Storage::disk(self::DISCO)->delete($doc->ruta);
             }
         });
+    }
+
+    /** Descarga directa desde Drive (el navegador la abre sin pasar por la API). */
+    public function getUrlDescargaAttribute(): ?string
+    {
+        return $this->drive_file_id ? GoogleDrive::urlDescarga($this->drive_file_id, $this->mime) : null;
     }
 
     public function sesion(): BelongsTo

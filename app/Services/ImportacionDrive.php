@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\DriveException;
 use App\Models\TipoReunion;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 
 /**
@@ -37,7 +38,12 @@ class ImportacionDrive
         return ($this->estado()['estado'] ?? null) === 'en_curso';
     }
 
-    /** Inicia el proceso en segundo plano y responde de inmediato. */
+    /**
+     * Inicia la importación y responde de inmediato.
+     *  - Con `php artisan serve` (desarrollo) atiende una petición a la vez: se lanza un proceso aparte.
+     *  - En el servidor (Apache/LiteSpeed/FPM) se ejecuta después de enviar la respuesta al navegador,
+     *    sin depender de exec() ni popen(), que los hostings compartidos suelen deshabilitar.
+     */
     public function lanzar(TipoReunion $tipo, string $clase): void
     {
         if ($this->enCurso()) {
@@ -46,7 +52,22 @@ class ImportacionDrive
 
         $this->iniciar($tipo, $clase, 'Iniciando…');
 
-        $php = escapeshellarg($this->binarioPhp());
+        if (PHP_SAPI === 'cli-server') {
+            $this->procesoAparte($tipo, $clase);
+
+            return;
+        }
+
+        app()->terminating(function () use ($tipo, $clase) {
+            ignore_user_abort(true);
+            set_time_limit(0);
+            Artisan::call('drive:importar', ['reunion' => $tipo->slug, 'clase' => $clase]);
+        });
+    }
+
+    private function procesoAparte(TipoReunion $tipo, string $clase): void
+    {
+        $php = escapeshellarg(PHP_BINARY);
         $artisan = escapeshellarg(base_path('artisan'));
         $log = escapeshellarg(storage_path('logs/drive-importacion.log'));
         $args = escapeshellarg($tipo->slug).' '.escapeshellarg($clase);
@@ -101,17 +122,5 @@ class ImportacionDrive
             'actualizado' => now()->toIso8601String(),
             'mensaje' => $mensaje,
         ]));
-    }
-
-    /** Bajo `php artisan serve`, PHP_BINARY es el mismo php.exe; en Apache/FPM puede no serlo. */
-    private function binarioPhp(): string
-    {
-        $binario = PHP_BINARY;
-        if (str_contains(strtolower(basename($binario)), 'php') && ! str_contains(strtolower($binario), 'fpm')
-            && ! str_contains(strtolower($binario), 'httpd')) {
-            return $binario;
-        }
-
-        return config('services.php_cli', 'php');
     }
 }

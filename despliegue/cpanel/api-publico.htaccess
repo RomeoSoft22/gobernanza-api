@@ -1,0 +1,37 @@
+# public_html/gobernanza-api — entrada pública de la API (https://juarezcampos.net/gobernanza-api).
+# Todas las rutas van a index.php; el código de Laravel vive en /home/juarezc/gobernanza-api-app.
+Options -Indexes -MultiViews
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /gobernanza-api/
+
+    # Siempre HTTPS
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # El JWT de identidad viaja en Authorization: Bearer
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Archivos reales de esta carpeta (favicon, robots)
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+
+    RewriteRule ^ index.php [L,QSA]
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
+</IfModule>
+
+# Nunca servir archivos ocultos, llaves ni respaldos
+<FilesMatch "(^\.|\.(bak|old|sql|sqlite|log|env|key|pem)$)">
+    Require all denied
+</FilesMatch>

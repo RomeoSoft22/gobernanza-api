@@ -78,6 +78,46 @@ Las extraordinarias reinician su numeración cada año.
 
 Para liberar espacio de versiones anteriores que guardaban copias: `php artisan drive:limpiar-copias`.
 
+## Ingreso con identidad (SSO)
+
+Todo el sistema exige iniciar sesión en `identidad.juarezcampos.net` (OAuth 2.0 Authorization Code + PKCE),
+igual que ISTQB y Firma. La API valida el JWT RS256 con el JWKS de identidad (`iss`, `aud=GOBERNANZA`, `exp`)
+y exige uno de los roles de `IDENTIDAD_ROLES` (por defecto `ADMIN`). El refresh token queda en una cookie HttpOnly.
+
+En el `.env`:
+
+```
+IDENTIDAD_CLIENT_ID=...        # client_id del sistema GOBERNANZA en identidad
+IDENTIDAD_CLIENT_SECRET=...    # client_secret (se muestra una sola vez al registrarlo)
+IDENTIDAD_REDIRECT_URI=http://localhost:4200/callback   # en producción: https://juarezcampos.net/gobernanza/callback
+IDENTIDAD_POST_LOGOUT_URI=http://localhost:4200/
+IDENTIDAD_AUDIENCE=GOBERNANZA
+IDENTIDAD_ROLES=ADMIN
+```
+
+En local el front-end usa el proxy de `ng serve` (`/api` → `127.0.0.1:8000`), así la cookie funciona como en producción.
+Para ingresar desde local, registre también `http://localhost:4200/callback` como redirección del cliente en identidad.
+
+## Despliegue en cPanel
+
+```bash
+bash gobernanza-api/despliegue/empaquetar-cpanel.sh                  # primer despliegue (incluye .env)
+ACTUALIZACION=1 bash gobernanza-api/despliegue/empaquetar-cpanel.sh  # actualizaciones (sin .env ni storage)
+```
+
+Genera `paquetes/cpanel-gobernanza-<fecha>/` junto a los repos (lleva secretos: nunca dentro de uno) con el `.zip`,
+el `.sql` y la guía `LEEME.md` (ver `despliegue/LEEME-cpanel.md`):
+
+- `public_html/gobernanza/` → front-end en `https://juarezcampos.net/gobernanza/`
+- `public_html/gobernanza-api/` → solo la entrada pública de la API (`https://juarezcampos.net/gobernanza-api/api`)
+- `/home/juarezc/gobernanza-api-app/` → código Laravel y `.env`, fuera de la carpeta pública
+
+## Pruebas
+
+```bash
+php artisan test
+```
+
 ## Modelo de datos
 
 - **tipos_reunion**: Seguimiento Operativo (`operativo`), Seguimiento Táctico (`tactico`).
@@ -94,7 +134,8 @@ Para liberar espacio de versiones anteriores que guardaban copias: `php artisan 
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/tipos-reunion` | Reuniones activas |
+| GET / POST | `/api/acceso/config` · `canjear` · `renovar` · `salir` | Ingreso con identidad (públicas) |
+| GET | `/api/tipos-reunion` | Reuniones activas (esta y todas las siguientes exigen el JWT) |
 | GET | `/api/sesiones` | Listado paginado. Filtros: `tipo_reunion_id, clase, anio, numero, mes, fecha_desde, fecha_hasta, estado, modalidad, documentacion, buscar, orden, direccion, page` |
 | GET / POST | `/api/sesiones/anios` | Años disponibles / crear año (carpetas en Drive) |
 | GET | `/api/sesiones/resumen` | Indicadores |
@@ -111,5 +152,4 @@ Para liberar espacio de versiones anteriores que guardaban copias: `php artisan 
 
 ## Pendiente recomendado
 
-- **Autenticación** del sistema (Laravel Sanctum + login): hoy la API no exige usuario.
 - Servir la API con Apache de Laragon (multihilo) en lugar de `php artisan serve`, que atiende una petición a la vez.
