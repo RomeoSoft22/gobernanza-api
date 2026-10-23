@@ -18,14 +18,21 @@ class Sesion extends Model
     public const DOCUMENTOS_REQUERIDOS = ['acta', 'asistencia', 'presentacion'];
 
     protected $fillable = [
-        'tipo_reunion_id', 'numero', 'anio', 'fecha', 'hora_inicio', 'hora_fin',
+        'tipo_reunion_id', 'clase', 'numero', 'anio', 'fecha', 'hora_inicio', 'hora_fin',
         'modalidad', 'lugar', 'estado', 'agenda', 'acuerdos', 'observaciones',
+        'drive_folder_id', 'drive_folder_url', 'drive_sincronizado_at',
     ];
+
+    public const CLASES = ['ordinaria', 'extraordinaria'];
+
+    /** Carpetas de Drive con el formato "2026.10.19 - 72va Reunión [Extraordinaria]". */
+    public const PATRON_CARPETA = '/^(\d{4})\.(\d{2})\.(\d{2})\s*-\s*(\d+)/u';
 
     protected $casts = [
         'fecha' => 'date:Y-m-d',
         'numero' => 'integer',
         'anio' => 'integer',
+        'drive_sincronizado_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -36,6 +43,14 @@ class Sesion extends Model
                 $sesion->anio = (int) $sesion->fecha->format('Y');
             }
         });
+    }
+
+    /** Nombre de la carpeta de la sesión en Drive, según la convención del equipo. */
+    public function nombreCarpetaDrive(): string
+    {
+        $nombre = sprintf('%s - %dva Reunión', $this->fecha->format('Y.m.d'), $this->numero);
+
+        return $this->clase === 'extraordinaria' ? $nombre.' Extraordinaria' : $nombre;
     }
 
     public function tipoReunion(): BelongsTo
@@ -53,6 +68,7 @@ class Sesion extends Model
     {
         return $q
             ->when($f['tipo_reunion_id'] ?? null, fn ($q, $v) => $q->where('tipo_reunion_id', $v))
+            ->when($f['clase'] ?? null, fn ($q, $v) => $q->where('clase', $v))
             ->when($f['anio'] ?? null, fn ($q, $v) => $q->where('anio', $v))
             ->when($f['numero'] ?? null, fn ($q, $v) => $q->where('numero', $v))
             ->when($f['numero_desde'] ?? null, fn ($q, $v) => $q->where('numero', '>=', $v))

@@ -9,6 +9,6 @@ class TipoReunionController extends Controller
 {
     public function index()
     {
-        return TipoReunion::where('activo', true)->orderBy('nombre')->get();
+        return TipoReunion::where('activo', true)->orderBy('orden')->get();
     }
 }

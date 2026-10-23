@@ -12,24 +12,42 @@ class SesionDocumento extends Model
 
     public const TIPOS = ['acta', 'asistencia', 'presentacion', 'adjunto'];
 
-    /** Tipos que admiten un solo archivo vigente (al subir otro, se reemplaza). */
-    public const TIPOS_UNICOS = ['acta', 'asistencia', 'presentacion'];
-
     public const DISCO = 'local';
 
-    protected $fillable = ['sesion_id', 'tipo', 'nombre_original', 'ruta', 'mime', 'tamano', 'descripcion'];
+    protected $fillable = [
+        'sesion_id', 'tipo', 'nombre_original', 'ruta', 'mime', 'tamano', 'descripcion',
+        'drive_file_id', 'drive_url', 'drive_modificado_at',
+    ];
 
     protected $hidden = ['ruta'];
 
-    protected $casts = ['tamano' => 'integer'];
+    protected $casts = ['tamano' => 'integer', 'drive_modificado_at' => 'datetime'];
 
     protected static function booted(): void
     {
-        static::deleting(fn (SesionDocumento $doc) => Storage::disk(self::DISCO)->delete($doc->ruta));
+        // Copias antiguas del servidor (antes de usar solo Drive). El archivo en Drive no se toca.
+        static::deleting(function (SesionDocumento $doc) {
+            if ($doc->ruta) {
+                Storage::disk(self::DISCO)->delete($doc->ruta);
+            }
+        });
     }
 
     public function sesion(): BelongsTo
     {
         return $this->belongsTo(Sesion::class);
+    }
+
+    /** Sugiere el tipo de documento a partir del nombre del archivo. */
+    public static function clasificar(string $nombre): string
+    {
+        $n = mb_strtolower($nombre);
+
+        return match (true) {
+            str_contains($n, 'acta') => 'acta',
+            (bool) preg_match('/asistencia|asistentes|participantes|lista/u', $n) => 'asistencia',
+            (bool) preg_match('/presentaci|diapositiva|\.pptx?$|exposici/u', $n) => 'presentacion',
+            default => 'adjunto',
+        };
     }
 }

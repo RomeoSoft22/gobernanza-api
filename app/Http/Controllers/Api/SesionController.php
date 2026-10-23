@@ -4,18 +4,25 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\SesionRequest;
+use App\Models\DriveCarpeta;
 use App\Models\Sesion;
+use App\Models\TipoReunion;
+use App\Services\DriveSincronizador;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 class SesionController extends Controller
 {
     private const ORDENES = ['numero', 'fecha', 'estado', 'created_at'];
 
+    public function __construct(private DriveSincronizador $drive) {}
+
     public function index(Request $request)
     {
         $f = $request->validate([
             'tipo_reunion_id' => ['nullable', 'integer'],
+            'clase' => ['nullable', Rule::in(Sesion::CLASES)],
             'anio' => ['nullable', 'integer'],
             'numero' => ['nullable', 'integer'],
             'numero_desde' => ['nullable', 'integer'],
@@ -32,41 +39,72 @@ class SesionController extends Controller
             'por_pagina' => ['nullable', 'integer', 'between:5,100'],
         ]);
 
+        $dir = $f['direccion'] ?? 'desc';
+
         return Sesion::query()
-            ->with('tipoReunion:id,codigo,nombre')
+            ->with('tipoReunion:id,codigo,slug,nombre')
             ->conContadores()
             ->filtrar($f)
-            ->orderBy($f['orden'] ?? 'numero', $f['direccion'] ?? 'desc')
+            ->orderBy($f['orden'] ?? 'fecha', $dir)
+            ->orderBy('numero', $dir)
             ->paginate($f['por_pagina'] ?? 15);
     }
 
-    /** Años con sesiones registradas (para las pestañas por año). */
+    /** Años disponibles: los que tienen sesiones y los creados en Drive aunque aún estén vacíos. */
     public function anios(Request $request)
     {
-        return Sesion::query()
-            ->when($request->integer('tipo_reunion_id'), fn ($q, $v) => $q->where('tipo_reunion_id', $v))
-            ->selectRaw('anio, COUNT(*) as total, MIN(numero) as desde, MAX(numero) as hasta')
+        $tipoId = $request->integer('tipo_reunion_id') ?: null;
+
+        $conSesiones = Sesion::query()
+            ->when($tipoId, fn ($q, $v) => $q->where('tipo_reunion_id', $v))
+            ->selectRaw('anio, COUNT(*) as total')
+            ->selectRaw("SUM(clase = 'ordinaria') as ordinarias, SUM(clase = 'extraordinaria') as extraordinarias")
             ->groupBy('anio')
-            ->orderByDesc('anio')
-            ->get();
+            ->get()
+            ->keyBy('anio');
+
+        $creados = DriveCarpeta::whereNotNull('anio')
+            ->when($tipoId, fn ($q, $v) => $q->where('tipo_reunion_id', $v))
+            ->pluck('anio');
+
+        return $conSesiones->keys()->merge($creados)->unique()->sortDesc()->values()
+            ->map(fn ($anio) => [
+                'anio' => (int) $anio,
+                'total' => (int) ($conSesiones[$anio]->total ?? 0),
+                'ordinarias' => (int) ($conSesiones[$anio]->ordinarias ?? 0),
+                'extraordinarias' => (int) ($conSesiones[$anio]->extraordinarias ?? 0),
+            ]);
     }
 
-    /** Indicadores para el tablero del módulo. */
+    /** Crea el año: carpetas "AAAA" en Drive para las reuniones ordinarias y extraordinarias. */
+    public function crearAnio(Request $request)
+    {
+        $data = $request->validate([
+            'tipo_reunion_id' => ['required', 'exists:tipos_reunion,id'],
+            'anio' => ['required', 'integer', 'between:2000,2100'],
+        ]);
+
+        $carpetas = $this->drive->crearAnio(TipoReunion::findOrFail($data['tipo_reunion_id']), $data['anio']);
+
+        return response()->json($carpetas, 201);
+    }
+
     public function resumen(Request $request)
     {
         $base = Sesion::query()
             ->when($request->integer('tipo_reunion_id'), fn ($q, $v) => $q->where('tipo_reunion_id', $v))
+            ->when($request->input('clase'), fn ($q, $v) => $q->where('clase', $v))
             ->when($request->integer('anio'), fn ($q, $v) => $q->where('anio', $v));
 
-        $porEstado = (clone $base)->selectRaw('estado, COUNT(*) as total')->groupBy('estado')->pluck('total', 'estado');
         $realizadas = (clone $base)->where('estado', 'realizada');
 
         return [
             'total' => (clone $base)->count(),
-            'por_estado' => $porEstado,
+            'por_estado' => (clone $base)->selectRaw('estado, COUNT(*) as total')->groupBy('estado')->pluck('total', 'estado'),
+            'por_clase' => (clone $base)->selectRaw('clase, COUNT(*) as total')->groupBy('clase')->pluck('total', 'clase'),
             'realizadas_sin_acta' => (clone $realizadas)->filtrar(['documentacion' => 'sin_acta'])->count(),
             'realizadas_incompletas' => (clone $realizadas)->filtrar(['documentacion' => 'incompleta'])->count(),
-            'ultima' => (clone $base)->with('tipoReunion:id,nombre')->orderByDesc('numero')->first(),
+            'ultima' => (clone $base)->orderByDesc('fecha')->orderByDesc('numero')->first(),
             'proxima' => (clone $base)->where('estado', 'programada')->whereDate('fecha', '>=', now()->toDateString())
                 ->orderBy('fecha')->first(),
         ];
@@ -74,9 +112,17 @@ class SesionController extends Controller
 
     public function siguienteNumero(Request $request)
     {
-        $request->validate(['tipo_reunion_id' => ['required', 'integer']]);
+        $data = $request->validate([
+            'tipo_reunion_id' => ['required', 'integer'],
+            'clase' => ['required', Rule::in(Sesion::CLASES)],
+            'anio' => ['nullable', 'integer'],
+        ]);
 
-        $max = Sesion::withTrashed()->where('tipo_reunion_id', $request->integer('tipo_reunion_id'))->max('numero');
+        // Ordinarias: correlativo continuo. Extraordinarias: reinician cada año.
+        $max = Sesion::withTrashed()
+            ->where(['tipo_reunion_id' => $data['tipo_reunion_id'], 'clase' => $data['clase']])
+            ->when($data['clase'] === 'extraordinaria', fn ($q) => $q->where('anio', $data['anio'] ?? now()->year))
+            ->max('numero');
 
         return ['numero' => ((int) $max) + 1];
     }
@@ -85,7 +131,7 @@ class SesionController extends Controller
     {
         $sesion = Sesion::create($request->validated());
 
-        return response()->json($this->cargar($sesion), 201);
+        return response()->json($this->conCarpetaDrive($sesion), 201);
     }
 
     public function show(Sesion $sesion)
@@ -105,6 +151,22 @@ class SesionController extends Controller
         $sesion->delete();
 
         return response()->noContent();
+    }
+
+    /** Crea la carpeta de la sesión en Drive si está conectado; un fallo no impide registrar la sesión. */
+    private function conCarpetaDrive(Sesion $sesion): array
+    {
+        $aviso = null;
+        if ($this->drive->disponible() && DriveCarpeta::raiz($sesion->tipo_reunion_id, $sesion->clase)) {
+            try {
+                $this->drive->carpetaSesion($sesion);
+            } catch (Throwable $e) {
+                report($e);
+                $aviso = 'La sesión se registró, pero no se pudo crear su carpeta en Drive: '.$e->getMessage();
+            }
+        }
+
+        return $this->cargar($sesion->refresh())->toArray() + ['aviso_drive' => $aviso];
     }
 
     private function cargar(Sesion $sesion): Sesion

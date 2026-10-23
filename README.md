@@ -1,67 +1,115 @@
-# Sistema de Control de Reuniones de Gobernanza
+# gobernanza-api
 
-Control de las sesiones de la reunión de **Seguimiento Operativo** (RA 315-2026): sesiones por año,
-filtros de búsqueda y gestión de acta, lista de asistencia, presentación y adjuntos.
+API (Laravel 13 + MySQL) del **Sistema de Control de Reuniones de Gobernanza** (RA 315-2026):
+reuniones de Seguimiento **Operativo** y **Táctico**, cada una con sesiones **ordinarias** y **extraordinarias**,
+documentos (acta, asistencia, presentación, adjuntos) e integración con **Google Drive**.
 
-| Capa      | Tecnología                         | Carpeta     |
-|-----------|------------------------------------|-------------|
-| Front-end | Angular 20 (standalone + signals)  | [gobernanza-web](https://github.com/RomeoSoft22/gobernanza-web) |
-| Back-end  | Laravel 13 (API REST)              | este repositorio |
-| BD        | MySQL 8.4 (Laragon)                | `gobernanza_reuniones` |
+El front-end está en [gobernanza-web](https://github.com/RomeoSoft22/gobernanza-web).
 
 ## Puesta en marcha (Laragon)
 
 ```bash
-# 1. Base de datos (una sola vez)
-C:\laragon\bin\mysql\mysql-8.4.3-winx64\bin\mysql.exe -u root -e "CREATE DATABASE IF NOT EXISTS gobernanza_reuniones CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+# Base de datos (una sola vez)
+C:\laragon\bin\mysql\mysql-8.4.3-winx64\bin\mysql.exe -u root -e "CREATE DATABASE IF NOT EXISTS juarezc_gobernanza CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
 
-# 2. API  (http://127.0.0.1:8000)
-cd gobernanza-api
 composer install
 copy .env.example .env
 php artisan key:generate
-php artisan migrate --seed          # crea tablas + tipo de reunión "Seguimiento Operativo"
-php artisan serve
-
-# 3. Front-end  (http://localhost:4200)
-cd gobernanza-web
-npm install
-npm start
+php artisan migrate --seed      # tablas + reuniones Operativo y Táctico
+php artisan serve               # http://127.0.0.1:8000
 ```
 
-> Use el PHP de Laragon (`C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe`), que trae `pdo_mysql`.
+> Use el PHP de Laragon (`C:\laragon\bin\php\php-8.3.33-Win32-vs16-x64\php.exe`), que carga `pdo_mysql`.
 
-Datos de demostración (72 sesiones): `php artisan db:seed --class=DemoSesionesSeeder`.
-Para volver a empezar limpio: `php artisan migrate:fresh --seed`.
+## Conectar Google Drive
+
+El sistema accede a Drive con **OAuth 2.0 usando su propia cuenta**: solo ve lo que su cuenta ya puede ver.
+
+1. Entre a <https://console.cloud.google.com/> con su cuenta institucional y cree un proyecto (p. ej. *Gobernanza*).
+2. **APIs y servicios › Biblioteca** → habilite **Google Drive API**.
+3. **APIs y servicios › Pantalla de consentimiento OAuth** → tipo **Interno** (solo usuarios de su organización),
+   nombre de la app y correo de soporte.
+4. **APIs y servicios › Credenciales › Crear credenciales › ID de cliente de OAuth**
+   - Tipo: **Aplicación web**
+   - URI de redireccionamiento autorizado: `http://127.0.0.1:8000/drive/callback`
+5. Copie el *ID de cliente* y el *Secreto* en el `.env`:
+   ```
+   GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=xxxxxxxx
+   ```
+6. Ejecute `php artisan config:clear`, abra el sistema → **Configuración › Google Drive** → **Conectar con Google Drive**.
+7. En la misma página pegue el enlace de la carpeta raíz de cada reunión y clase, por ejemplo
+   `…/1. Equipo Operativo/2. Reuniones Ordinarias` (la que contiene `2025`, `2026`, …).
+
+> Si "Interno" no está disponible o el administrador de Workspace restringe apps, solicite que autorice
+> el ID de cliente en la consola de administración (Seguridad › Controles de API).
+
+### Convención de carpetas en Drive
+
+```
+<Raíz elegida>/                       p. ej. 2. Reuniones Ordinarias
+└── 2026/                             se crea con "Nuevo año"
+    └── 2026.10.19 - 72va Reunión/    se crea al registrar la sesión
+        ├── Acta 72.pdf               acta firmada
+        ├── Acta 72.docx              versión Word
+        ├── Lista de asistencia.pdf
+        └── Presentación.pptx
+```
+
+**Drive es el único repositorio**: el sistema no guarda copias de los archivos, solo el enlace, el tipo asignado
+y los metadatos (nombre, tamaño, fecha). Al abrir una sesión su carpeta se lee **en vivo**: los archivos nuevos
+aparecen con el tipo sugerido por su nombre (*acta*, *asistencia/lista*, *presentación/.pptx*; el resto como
+adjunto), los que se quitaron de la carpeta desaparecen y el tipo que usted asigne (o mueva de tarjeta) se conserva.
+Quitar un documento desde el sistema lo envía a la **papelera de Drive** (recuperable 30 días).
+
+### Importar el historial
+
+Desde **Configuración › Google Drive › Importar sesiones y documentos**, o por consola (recomendado para muchas sesiones):
+
+```bash
+php artisan drive:importar operativo                 # ordinarias
+php artisan drive:importar operativo extraordinaria
+php artisan drive:importar tactico
+```
+
+Las carpetas de sesión deben empezar con `AAAA.MM.DD - NN`; las que no cumplan el formato se listan como omitidas.
+Desde el panel la importación corre en segundo plano (el sistema sigue respondiendo) y puede repetirse sin duplicar.
+Las extraordinarias reinician su numeración cada año.
+
+Para liberar espacio de versiones anteriores que guardaban copias: `php artisan drive:limpiar-copias`.
 
 ## Modelo de datos
 
-- **tipos_reunion**: catálogo de reuniones (código, nombre, base legal, periodicidad). Permite agregar otras reuniones.
-- **sesiones**: número correlativo por reunión (no se reinicia por año), fecha, año (derivado de la fecha),
-  horario, modalidad, lugar, estado (`realizada`, `programada`, `reprogramada`, `suspendida`), agenda, acuerdos, observaciones.
-- **sesion_documentos**: `acta`, `asistencia`, `presentacion` (uno vigente; subir otro lo reemplaza) y `adjunto` (varios).
-  Archivos en `storage/app/private/sesiones/{año}/sesion-NNN/{tipo}/`.
+- **tipos_reunion**: Seguimiento Operativo (`operativo`), Seguimiento Táctico (`tactico`).
+- **sesiones**: reunión, clase (`ordinaria` / `extraordinaria`), número correlativo por reunión y clase
+  (las extraordinarias reinician cada año),
+  fecha, año, horario, modalidad, lugar, estado, agenda, acuerdos, observaciones y carpeta de Drive.
+- **sesion_documentos**: tipo asignado y enlace al archivo en Drive (`drive_file_id`, `drive_url`, tamaño, fecha).
+  Varios archivos por tipo; se pueden mover de un tipo a otro.
+- **drive_carpetas**: carpeta raíz y carpetas de año por reunión y clase.
+- **drive_conexiones**: cuenta de Google conectada (tokens cifrados con `APP_KEY`).
+
 
 ## API
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/api/tipos-reunion` | Tipos de reunión activos |
-| GET | `/api/sesiones` | Listado paginado con filtros: `anio, numero, mes, fecha_desde, fecha_hasta, estado, modalidad, documentacion (completa, incompleta, sin_acta, sin_asistencia, sin_presentacion, con_adjuntos), buscar, orden, direccion, page` |
-| GET | `/api/sesiones/anios` | Años con sesiones (pestañas) |
-| GET | `/api/sesiones/resumen?anio=` | Indicadores |
-| GET | `/api/sesiones/siguiente-numero?tipo_reunion_id=` | Correlativo sugerido |
-| POST/GET/PUT/DELETE | `/api/sesiones/{id}` | CRUD de sesiones |
-| POST | `/api/sesiones/{id}/documentos` | Subir (`tipo`, `archivos[]`, `descripcion`) — máx. 50 MB c/u |
-| GET | `/api/documentos/{id}/ver` · `/descargar` | Ver en el navegador / descargar |
-| DELETE | `/api/documentos/{id}` | Eliminar documento |
-
-## Agregar una opción al menú
-
-1. Añadir el ítem en `gobernanza-web/src/app/core/menu.ts`.
-2. Registrar la ruta en `gobernanza-web/src/app/app.routes.ts` (hoy "Documentos clave" apunta a una página "Próximamente").
+| GET | `/api/tipos-reunion` | Reuniones activas |
+| GET | `/api/sesiones` | Listado paginado. Filtros: `tipo_reunion_id, clase, anio, numero, mes, fecha_desde, fecha_hasta, estado, modalidad, documentacion, buscar, orden, direccion, page` |
+| GET / POST | `/api/sesiones/anios` | Años disponibles / crear año (carpetas en Drive) |
+| GET | `/api/sesiones/resumen` | Indicadores |
+| GET | `/api/sesiones/siguiente-numero?tipo_reunion_id=&clase=` | Correlativo sugerido |
+| CRUD | `/api/sesiones/{id}` | Sesiones (al crear, se crea su carpeta en Drive) |
+| POST | `/api/sesiones/{id}/documentos` | Subir (`tipo`, `archivos[]`) directamente a Drive |
+| GET | `/api/documentos/{id}/ver` · `/descargar` | Redirige a Drive (ver / descarga directa) |
+| PATCH / DELETE | `/api/documentos/{id}` | Mover de tipo / enviar a la papelera de Drive |
+| POST | `/api/sesiones/{id}/drive/sincronizar?crear=0\|1` | Lee en vivo la carpeta de la sesión |
+| GET | `/api/drive/estado` · `/api/drive/autorizar` | Estado de la conexión / URL de consentimiento |
+| PUT | `/api/drive/carpetas` | Asignar carpeta raíz (`tipo_reunion_id`, `clase`, `enlace`) |
+| POST | `/api/drive/importar-historial` | Lanza la importación en segundo plano |
+| GET | `/api/drive/importacion` | Avance de la importación |
 
 ## Pendiente recomendado
 
-- **Autenticación** (Laravel Sanctum + login): hoy la API no exige usuario.
-- Registro de quién subió cada documento (auditoría).
+- **Autenticación** del sistema (Laravel Sanctum + login): hoy la API no exige usuario.
+- Servir la API con Apache de Laragon (multihilo) en lugar de `php artisan serve`, que atiende una petición a la vez.

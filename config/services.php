@@ -35,4 +35,17 @@ return [
         ],
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI', env('APP_URL').'/drive/callback'),
+    ],
+
+    // php.exe de línea de comandos para lanzar la importación de Drive en segundo plano
+    // (solo hace falta si la API corre bajo Apache/Nginx en lugar de `php artisan serve`).
+    'php_cli' => env('PHP_CLI_PATH', 'php'),
+
+    // URL del front-end Angular (para volver después de conectar Google Drive).
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:4200'),
+
 ];

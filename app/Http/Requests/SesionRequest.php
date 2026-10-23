@@ -15,13 +15,19 @@ class SesionRequest extends FormRequest
     public function rules(): array
     {
         $sesion = $this->route('sesion');
+        $fecha = strtotime((string) $this->input('fecha'));
 
         return [
             'tipo_reunion_id' => ['required', 'exists:tipos_reunion,id'],
+            'clase' => ['required', Rule::in(['ordinaria', 'extraordinaria'])],
             'numero' => [
                 'required', 'integer', 'min:1',
                 Rule::unique('sesiones', 'numero')
                     ->where('tipo_reunion_id', $this->input('tipo_reunion_id'))
+                    ->where('clase', $this->input('clase'))
+                    // Las extraordinarias reinician su numeración cada año.
+                    ->when($this->input('clase') === 'extraordinaria' && $fecha,
+                        fn ($rule) => $rule->where('anio', (int) date('Y', $fecha)))
                     ->whereNull('deleted_at')
                     ->ignore($sesion?->id),
             ],
@@ -40,7 +46,9 @@ class SesionRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'numero.unique' => 'Ya existe una sesión con ese número para esta reunión.',
+            'numero.unique' => $this->input('clase') === 'extraordinaria'
+                ? 'Ya existe una sesión extraordinaria con ese número en ese año.'
+                : 'Ya existe una sesión ordinaria con ese número.',
             'hora_fin.after' => 'La hora de fin debe ser posterior a la hora de inicio.',
         ];
     }

@@ -5,8 +5,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Catálogo de tipos de reunión (p. ej. "Seguimiento Operativo" - RA 315-2026).
- * Permite incorporar otras reuniones de gobernanza sin cambiar la estructura.
+ * Catálogo de reuniones de gobernanza (Seguimiento Operativo, Seguimiento Táctico…).
+ * El slug se usa en las rutas del front-end: /reuniones/{slug}/sesiones.
  */
 return new class extends Migration
 {
@@ -15,10 +15,12 @@ return new class extends Migration
         Schema::create('tipos_reunion', function (Blueprint $table) {
             $table->id();
             $table->string('codigo', 30)->unique();
+            $table->string('slug', 50)->unique();
             $table->string('nombre', 150);
             $table->string('base_legal', 150)->nullable();
-            $table->string('periodicidad', 30)->default('semanal');
+            $table->string('periodicidad', 30)->nullable();
             $table->text('descripcion')->nullable();
+            $table->unsignedSmallInteger('orden')->default(0);
             $table->boolean('activo')->default(true);
             $table->timestamps();
         });

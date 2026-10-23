@@ -5,8 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Sesion;
 use App\Models\SesionDocumento;
+use App\Services\DriveSincronizador;
+use App\Services\GoogleDrive;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -14,9 +15,10 @@ class SesionDocumentoController extends Controller
 {
     private const EXTENSIONES = 'pdf,doc,docx,xls,xlsx,ppt,pptx,jpg,jpeg,png,zip,rar,txt,csv';
 
+    public function __construct(private DriveSincronizador $drive) {}
+
     /**
-     * Sube uno o varios archivos. Para acta, asistencia y presentación
-     * el archivo nuevo reemplaza al anterior; los adjuntos se acumulan.
+     * Sube uno o varios archivos directamente a la carpeta de la sesión en Google Drive.
      */
     public function store(Request $request, Sesion $sesion)
     {
@@ -30,54 +32,69 @@ class SesionDocumentoController extends Controller
             'archivos.*.mimes' => 'Formato no permitido. Use: '.self::EXTENSIONES.'.',
         ]);
 
-        $unico = in_array($data['tipo'], SesionDocumento::TIPOS_UNICOS, true);
-        $archivos = $unico ? [($data['archivos'])[0]] : $data['archivos'];
-        $carpeta = sprintf('sesiones/%d/sesion-%03d/%s', $sesion->anio, $sesion->numero, $data['tipo']);
-
-        $anteriores = $unico ? $sesion->documentos()->where('tipo', $data['tipo'])->get() : collect();
-
-        $creados = DB::transaction(fn () => collect($archivos)->map(fn ($archivo) => $sesion->documentos()->create([
-                'tipo' => $data['tipo'],
-                'nombre_original' => $archivo->getClientOriginalName(),
-                'ruta' => $archivo->store($carpeta, SesionDocumento::DISCO),
-                'mime' => $archivo->getMimeType(),
-                'tamano' => $archivo->getSize(),
-                'descripcion' => $data['descripcion'] ?? null,
-            ])));
-
-        // Solo se elimina la versión anterior cuando la nueva quedó guardada.
-        $anteriores->each->delete();
+        $creados = collect($data['archivos'])->map(
+            fn ($archivo) => $this->drive->subirDocumento($sesion, $archivo, $data['tipo'], $data['descripcion'] ?? null)
+        );
 
         return response()->json($creados, 201);
     }
 
-    /** Muestra el archivo en el navegador (PDF, imágenes). */
+    /** Abre el archivo en Google Drive (las copias antiguas del servidor se siguen sirviendo). */
     public function ver(SesionDocumento $documento)
     {
-        return Storage::disk(SesionDocumento::DISCO)->response(
-            $documento->ruta,
-            $documento->nombre_original,
-            ['Content-Type' => $documento->mime ?? 'application/octet-stream'],
-            'inline'
-        );
+        if ($documento->drive_url) {
+            return redirect()->away($documento->drive_url);
+        }
+
+        return $this->copiaLocal($documento, 'inline');
     }
 
+    /** Descarga directa desde Google Drive. */
     public function descargar(SesionDocumento $documento)
     {
-        return Storage::disk(SesionDocumento::DISCO)->download($documento->ruta, $documento->nombre_original);
+        if ($documento->drive_file_id) {
+            return redirect()->away(GoogleDrive::urlDescarga($documento->drive_file_id, $documento->mime));
+        }
+
+        return $this->copiaLocal($documento, 'attachment');
     }
 
+    /** Edita la descripción o mueve el documento a otro tipo (p. ej. de "acta" a "asistencia"). */
     public function update(Request $request, SesionDocumento $documento)
     {
-        $documento->update($request->validate(['descripcion' => ['nullable', 'string', 'max:255']]));
+        $documento->update($request->validate([
+            'descripcion' => ['nullable', 'string', 'max:255'],
+            'tipo' => ['sometimes', Rule::in(SesionDocumento::TIPOS)],
+        ]));
 
         return $documento;
     }
 
-    public function destroy(SesionDocumento $documento)
+    /**
+     * Quita el documento de la sesión enviando el archivo a la papelera de Drive
+     * (recuperable 30 días). Como la lista se lee de Drive, solo desvincularlo haría
+     * que reapareciera en la siguiente lectura.
+     */
+    public function destroy(SesionDocumento $documento, GoogleDrive $drive)
     {
+        if ($documento->drive_file_id) {
+            $drive->enviarAPapelera($documento->drive_file_id);
+        }
         $documento->delete();
 
         return response()->noContent();
+    }
+
+    /** Documentos cargados antes de usar solo Drive y que aún tienen copia en el servidor. */
+    private function copiaLocal(SesionDocumento $documento, string $disposicion)
+    {
+        abort_unless($documento->ruta && Storage::disk(SesionDocumento::DISCO)->exists($documento->ruta), 404, 'El archivo no está disponible.');
+
+        return Storage::disk(SesionDocumento::DISCO)->response(
+            $documento->ruta,
+            $documento->nombre_original,
+            ['Content-Type' => $documento->mime ?? 'application/octet-stream'],
+            $disposicion
+        );
     }
 }

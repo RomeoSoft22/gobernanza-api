@@ -5,8 +5,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Sesiones de una reunión. El número es correlativo por tipo de reunión
- * (no se reinicia por año) y el año se guarda para filtrar/agrupar rápido.
+ * Sesiones de una reunión. El número es correlativo por reunión y clase
+ * (ordinaria / extraordinaria) y no se reinicia por año.
  */
 return new class extends Migration
 {
@@ -15,6 +15,7 @@ return new class extends Migration
         Schema::create('sesiones', function (Blueprint $table) {
             $table->id();
             $table->foreignId('tipo_reunion_id')->constrained('tipos_reunion')->restrictOnDelete();
+            $table->enum('clase', ['ordinaria', 'extraordinaria'])->default('ordinaria');
             $table->unsignedInteger('numero');
             $table->unsignedSmallInteger('anio');
             $table->date('fecha');
@@ -26,10 +27,16 @@ return new class extends Migration
             $table->text('agenda')->nullable();
             $table->text('acuerdos')->nullable();
             $table->text('observaciones')->nullable();
+
+            // Carpeta de la sesión en Google Drive
+            $table->string('drive_folder_id', 100)->nullable();
+            $table->string('drive_folder_url', 255)->nullable();
+            $table->timestamp('drive_sincronizado_at')->nullable();
+
             $table->timestamps();
             $table->softDeletes();
 
-            $table->unique(['tipo_reunion_id', 'numero']);
+            $table->unique(['tipo_reunion_id', 'clase', 'numero']);
             $table->index(['anio', 'fecha']);
             $table->index('estado');
         });
